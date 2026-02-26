@@ -55,11 +55,14 @@ import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.util.DyeColor;
 import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.Chunk;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 
@@ -643,6 +646,21 @@ public class Utils {
         vec.z = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ());
 
         return vec;
+    }
+
+    public static List<Vec3d> getBoxCorners(Box box) {
+        List<Vec3d> list = new ArrayList<>();
+
+        list.add(new Vec3d(box.minX, box.minY, box.minZ));
+        list.add(new Vec3d(box.minX, box.minY, box.maxZ));
+        list.add(new Vec3d(box.minX, box.maxY, box.minZ));
+        list.add(new Vec3d(box.minX, box.maxY, box.maxZ));
+        list.add(new Vec3d(box.maxX, box.minY, box.minZ));
+        list.add(new Vec3d(box.maxX, box.minY, box.maxZ));
+        list.add(new Vec3d(box.maxX, box.maxY, box.minZ));
+        list.add(new Vec3d(box.maxX, box.maxY, box.maxZ));
+
+        return list;
     }
 
     // Filters

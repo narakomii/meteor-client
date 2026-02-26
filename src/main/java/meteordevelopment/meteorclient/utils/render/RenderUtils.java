@@ -34,6 +34,9 @@ public class RenderUtils {
     private static final Pool<RenderBlock> renderBlockPool = new Pool<>(RenderBlock::new);
     private static final List<RenderBlock> renderBlocks = new ObjectArrayList<>();
 
+    private static final Pool<RenderPoint> renderPointPool = new Pool<>(RenderPoint::new);
+    private static final List<RenderPoint> renderPoints = new ObjectArrayList<>();
+
     private RenderUtils() {
     }
 
@@ -97,25 +100,43 @@ public class RenderUtils {
         renderBlocks.add(renderBlockPool.get().set(blockPos, sideColor, lineColor, shapeMode, excludeDir, duration, fade, shrink));
     }
 
+    public static void renderTickingPoint(Vec3d pos, Color color, int duration, boolean fade) {
+        renderPoints.add(renderPointPool.get().set(pos, color, duration, fade));
+    }
+
     @EventHandler
     private static void onTick(TickEvent.Pre event) {
-        if (renderBlocks.isEmpty()) return;
+        if (!renderPoints.isEmpty()) {
+            renderPoints.removeIf(next -> {
+                next.tick();
 
-        renderBlocks.removeIf(next -> {
-            next.tick();
+                if (next.ticks <= 0) {
+                    renderPointPool.free(next);
+                    return true;
+                } else {
+                    return false;
+                }
+            });
+        }
 
-            if (next.ticks <= 0) {
-                renderBlockPool.free(next);
-                return true;
-            } else {
-                return false;
-            }
-        });
+        if (!renderBlocks.isEmpty()) {
+            renderBlocks.removeIf(next -> {
+                next.tick();
+
+                if (next.ticks <= 0) {
+                    renderBlockPool.free(next);
+                    return true;
+                } else {
+                    return false;
+                }
+            });
+        }
     }
 
     @EventHandler
     private static void onRender(Render3DEvent event) {
         renderBlocks.forEach(block -> block.render(event));
+        renderPoints.forEach(point -> point.render(event));
     }
 
     public static class RenderBlock {
@@ -167,6 +188,47 @@ public class RenderUtils {
 
             sideColor.a = preSideA;
             lineColor.a = preLineA;
+        }
+    }
+
+    public static class RenderPoint {
+        public Vec3d pos = Vec3d.ZERO;
+
+        public Color color;
+
+        public int ticks, duration;
+        public boolean fade;
+
+        public RenderPoint set(Vec3d pos, Color color, int duration, boolean fade) {
+            this.pos = pos;
+            this.color = color;
+            this.fade = fade;
+            this.ticks = duration;
+            this.duration = duration;
+
+            return this;
+        }
+
+        public void tick() {
+            ticks--;
+        }
+
+        private static final double s = 0.005;
+
+        public void render(Render3DEvent event) {
+            int preA = color.a;
+            double x1 = pos.x - s, y1 = pos.y - s, z1 = pos.z - s,
+                   x2 = pos.x + s, y2 = pos.y + s, z2 = pos.z + s;
+
+            double d = (double) (ticks - event.tickDelta) / duration;
+
+            if (fade) {
+                color.a = (int) (color.a * d);
+            }
+
+            event.renderer.box(x1, y1, z1, x2, y2, z2, color, Color.BLACK, ShapeMode.Sides, 0);
+
+            color.a = preA;
         }
     }
 }
