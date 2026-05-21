@@ -101,7 +101,7 @@ public class RenderUtils {
         renderBlocks.add(renderBlockPool.get().set(blockPos, sideColor, lineColor, shapeMode, excludeDir, duration, fade, shrink));
     }
 
-    public static void renderTickingPoint(Vec3d pos, Color color, int duration, boolean fade) {
+    public static void renderTickingPoint(Vec3 pos, Color color, int duration, boolean fade) {
         renderPoints.add(renderPointPool.get().set(pos, color, duration, fade));
     }
 
@@ -197,14 +197,14 @@ public class RenderUtils {
     }
 
     public static class RenderPoint {
-        public Vec3d pos = Vec3d.ZERO;
+        public Vec3 pos = Vec3.ZERO;
 
         public Color color;
 
         public int ticks, duration;
         public boolean fade;
 
-        public RenderPoint set(Vec3d pos, Color color, int duration, boolean fade) {
+        public RenderPoint set(Vec3 pos, Color color, int duration, boolean fade) {
             this.pos = pos;
             this.color = color;
             this.fade = fade;

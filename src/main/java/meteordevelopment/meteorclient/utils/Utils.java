@@ -28,9 +28,6 @@ import meteordevelopment.meteorclient.utils.world.ChunkIterator;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.ResourceLoadStateTracker;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
-import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
 import net.minecraft.core.BlockPos;
@@ -40,16 +37,24 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.util.DyeColor;
-import net.minecraft.util.collection.DefaultedList;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.Chunk;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.Mth;
+import net.minecraft.world.ItemStackWithSlot;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.TypedEntityData;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -537,10 +542,7 @@ public class Utils {
     }
 
     public static boolean canOpenGui() {
-        if (canUpdate()) return mc.screen == null;
-        return mc.screen instanceof TitleScreen
-            || mc.screen instanceof JoinMultiplayerScreen
-            || mc.screen instanceof SelectWorldScreen;
+        return canUpdate() && mc.screen == null;
     }
 
     public static boolean canCloseGui() {
@@ -660,17 +662,17 @@ public class Utils {
         return vec;
     }
 
-    public static List<Vec3d> getBoxCorners(Box box) {
-        List<Vec3d> list = new ArrayList<>();
+    public static List<Vec3> getBoxCorners(AABB box) {
+        List<Vec3> list = new ArrayList<>();
 
-        list.add(new Vec3d(box.minX, box.minY, box.minZ));
-        list.add(new Vec3d(box.minX, box.minY, box.maxZ));
-        list.add(new Vec3d(box.minX, box.maxY, box.minZ));
-        list.add(new Vec3d(box.minX, box.maxY, box.maxZ));
-        list.add(new Vec3d(box.maxX, box.minY, box.minZ));
-        list.add(new Vec3d(box.maxX, box.minY, box.maxZ));
-        list.add(new Vec3d(box.maxX, box.maxY, box.minZ));
-        list.add(new Vec3d(box.maxX, box.maxY, box.maxZ));
+        list.add(new Vec3(box.minX, box.minY, box.minZ));
+        list.add(new Vec3(box.minX, box.minY, box.maxZ));
+        list.add(new Vec3(box.minX, box.maxY, box.minZ));
+        list.add(new Vec3(box.minX, box.maxY, box.maxZ));
+        list.add(new Vec3(box.maxX, box.minY, box.minZ));
+        list.add(new Vec3(box.maxX, box.minY, box.maxZ));
+        list.add(new Vec3(box.maxX, box.maxY, box.minZ));
+        list.add(new Vec3(box.maxX, box.maxY, box.maxZ));
 
         return list;
     }

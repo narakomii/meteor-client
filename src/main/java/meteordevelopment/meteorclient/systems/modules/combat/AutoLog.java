@@ -21,17 +21,17 @@ import meteordevelopment.meteorclient.utils.entity.DamageUtils;
 import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityStatuses;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Colors;
-import net.minecraft.util.Formatting;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityEvent;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
+import net.minecraft.util.CommonColors;
 
 import java.util.Set;
 
@@ -197,18 +197,18 @@ public class AutoLog extends Module {
         }
     }
 
-    private boolean ignore(PlayerEntity player) {
+    private boolean ignore(Player player) {
         if (!ignoreInvalid.get()) return false;
 
-        PlayerListEntry entry;
+        PlayerInfo entry;
         try {
             if (EntityUtils.getGameMode(player) == null) return true;
-            if (player.getStringifiedName().contains(" ")) return true;
+            if (player.getName().getString().contains(" ")) return true;
 
-            entry = mc.getNetworkHandler().getPlayerListEntry(player.getUuid());
+            entry = mc.getConnection().getPlayerInfo(player.getUUID());
             if (entry == null) return true;
             if (entry.getProfile() == null) return true;
-            if (entry.getProfile().name() != player.getStringifiedName()) return true;
+            if (entry.getProfile().name() != player.getName().getString()) return true;
             if (entry.getLatency() > 1) return true;
         } catch (NullPointerException e) {
             return true;
@@ -242,18 +242,18 @@ public class AutoLog extends Module {
         if (!onlyTrusted.get() && !instantDeath.get() && entities.get().isEmpty())
             return; // only check all entities if needed
 
-        for (Entity entity : mc.world.getEntities()) {
-            if (entity instanceof PlayerEntity player && player.getUuid() != mc.player.getUuid()) {
-                if (onlyTrusted.get() && player != mc.player && !Friends.get().isFriend(player) && !ignore((PlayerEntity) entity)) {
+        for (Entity entity : mc.level.entitiesForRendering()) {
+            if (entity instanceof Player player && player.getUUID() != mc.player.getUUID()) {
+                if (onlyTrusted.get() && player != mc.player && !Friends.get().isFriend(player) && !ignore((Player) entity)) {
                     if (usePlayerRange.get()) {
                         if (PlayerUtils.isWithin(entity, playerRange.get())) {
-                            disconnect(Text.literal("Non-trusted player '" + Formatting.RED + player.getName().getString() + Formatting.WHITE + "' was within range."));
+                            disconnect(Component.literal("Non-trusted player '" + ChatFormatting.RED + player.getName().getString() + ChatFormatting.WHITE + "' was within range."));
                             if (toggleOff.get()) this.toggle();
                             return;
                         }
                     }
                     else {
-                        disconnect(Text.literal("Non-trusted player '" + Formatting.RED + player.getName().getString() + Formatting.WHITE + "' appeared in your render distance."));
+                        disconnect(Component.literal("Non-trusted player '" + ChatFormatting.RED + player.getName().getString() + ChatFormatting.WHITE + "' appeared in your render distance."));
                         if (toggleOff.get()) this.toggle();
                         return;
                     }
