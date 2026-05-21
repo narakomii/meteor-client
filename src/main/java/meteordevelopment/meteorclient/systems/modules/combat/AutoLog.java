@@ -184,10 +184,10 @@ public class AutoLog extends Module {
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
-        if (!(event.packet instanceof EntityStatusS2CPacket p)) return;
-        if (p.getStatus() != EntityStatuses.USE_TOTEM_OF_UNDYING) return;
+        if (!(event.packet instanceof ClientboundEntityEventPacket p)) return;
+        if (p.getEventId() != EntityEvent.PROTECTED_FROM_DEATH) return;
 
-        Entity entity = p.getEntity(mc.world);
+        Entity entity = p.getEntity(mc.level);
         if (entity == null || !entity.equals(mc.player)) return;
 
         pops++;
@@ -275,7 +275,7 @@ public class AutoLog extends Module {
             entityCounts.clear();
 
             // Iterate through all entities in the world and count the ones that match the selected types and are within range
-            for (Entity entity : mc.world.getEntities()) {
+            for (Entity entity : mc.level.entitiesForRendering()) {
                 if (PlayerUtils.isWithin(entity, range.get()) && entities.get().contains(entity.getType())) {
                     totalEntities++;
                     if (!useTotalCount.get()) {
@@ -287,12 +287,11 @@ public class AutoLog extends Module {
             if (useTotalCount.get() && totalEntities >= combinedEntityThreshold.get()) {
                 disconnect("Total number of selected entities within range exceeded the limit.");
                 if (toggleOff.get()) this.toggle();
-            }
-            else if (!useTotalCount.get()) {
+            } else if (!useTotalCount.get()) {
                 // Check if the count of each entity type exceeds the specified limit
                 for (Object2IntMap.Entry<EntityType<?>> entry : entityCounts.object2IntEntrySet()) {
                     if (entry.getIntValue() >= individualEntityThreshold.get()) {
-                        disconnect("Number of " + entry.getKey().getName().getString() + " within range exceeded the limit.");
+                        disconnect("Number of " + entry.getKey().getDescription().getString() + " within range exceeded the limit.");
                         if (toggleOff.get()) this.toggle();
                         return;
                     }
@@ -302,20 +301,20 @@ public class AutoLog extends Module {
     }
 
     private void disconnect(String reason) {
-        disconnect(Text.literal(reason));
+        disconnect(Component.literal(reason));
     }
 
-    private void disconnect(Text reason) {
-        MutableText text = Text.literal("[AutoLog] ");
+    private void disconnect(Component reason) {
+        MutableComponent text = Component.literal("[AutoLog] ");
         text.append(reason);
 
         AutoReconnect autoReconnect = Modules.get().get(AutoReconnect.class);
         if (autoReconnect.isActive() && toggleAutoReconnect.get()) {
-            text.append(Text.literal("\n\nINFO - AutoReconnect was disabled").withColor(Colors.GRAY));
+            text.append(Component.literal("\n\nINFO - AutoReconnect was disabled").withColor(CommonColors.GRAY));
             autoReconnect.toggle();
         }
 
-        mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(text));
+        mc.player.connection.handleDisconnect(new ClientboundDisconnectPacket(text));
     }
 
     private class StaticListener {
@@ -324,7 +323,7 @@ public class AutoLog extends Module {
             if (isActive()) disableHealthListener();
 
             else if (Utils.canUpdate()
-                && !mc.player.isDead()
+                && !mc.player.isDeadOrDying()
                 && mc.player.getHealth() > health.get()) {
                 info("Player health greater than minimum, re-enabling module.");
                 toggle();

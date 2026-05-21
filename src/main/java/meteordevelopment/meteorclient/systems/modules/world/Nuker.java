@@ -8,7 +8,7 @@ package meteordevelopment.meteorclient.systems.modules.world;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
-import meteordevelopment.meteorclient.events.meteor.KeyEvent;
+import meteordevelopment.meteorclient.events.meteor.KeyInputEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -263,14 +263,14 @@ public class Nuker extends Module {
     private final Setting<SettingColor> sideColorBox = sgRender.add(new ColorSetting.Builder()
         .name("side-color")
         .description("The side color of the bounding box.")
-        .defaultValue(new SettingColor(16,106,144, 100))
+        .defaultValue(new SettingColor(16, 106, 144, 100))
         .build()
     );
 
     private final Setting<SettingColor> lineColorBox = sgRender.add(new ColorSetting.Builder()
         .name("line-color")
         .description("The line color of the bounding box.")
-        .defaultValue(new SettingColor(16,106,144, 255))
+        .defaultValue(new SettingColor(16, 106, 144, 255))
         .build()
     );
 
@@ -434,7 +434,7 @@ public class Nuker extends Module {
     }
 
     @EventHandler
-    private void onKey(KeyEvent event) {
+    private void onKey(KeyInputEvent event) {
         if (event.action == KeyAction.Press) addTargetedBlockToList();
     }
 
@@ -478,7 +478,7 @@ public class Nuker extends Module {
         } else {
             // Only change me if you want to mess with 3D rotations:
             // I messed with it
-            Direction direction = mc.player.getHorizontalFacing();
+            Direction direction = mc.player.getDirection();
             switch (direction) {
                 case Direction.SOUTH -> {
                     pZ_ += 1;
@@ -511,14 +511,15 @@ public class Nuker extends Module {
         // Flatten
         if (mode.get() == Mode.Flatten) pos1.setY((int) Math.floor(pY + 0.5));
 
-        Box box = new Box(pos1.toCenterPos(), pos2.toCenterPos());
+        AABB box = new AABB(pos1.getCenter(), pos2.getCenter());
 
         // Find blocks to break
         BlockIterator.register(Math.max((int) Math.ceil(rangeD + 1), maxh), Math.max((int) Math.ceil(rangeD), maxv), (blockPos, blockState) -> {
             Vec3d center = blockPos.toCenterPos();
             switch (shape.get()) {
                 case Sphere -> {
-                    if (Utils.squaredDistance(pX, pY, pZ, center.getX(), center.getY(), center.getZ()) > rangeSq) return;
+                    if (Utils.squaredDistance(pX, pY, pZ, center.x(), center.y(), center.z()) > rangeSq)
+                        return;
                 }
                 case UniformCube -> {
                     if (chebyshevDist(playerBlockPos.getX(), playerBlockPos.getY(), playerBlockPos.getZ(), blockPos.getX(), blockPos.getY(), blockPos.getZ()) >= rangeD) return;
@@ -532,10 +533,11 @@ public class Nuker extends Module {
             if (mode.get() == Mode.Flatten && blockPos.getY() + 0.5 < pY) return;
 
             // Smash
-            if (mode.get() == Mode.Smash && blockState.getHardness(mc.world, blockPos) != 0) return;
+            if (mode.get() == Mode.Smash && blockState.getDestroySpeed(mc.level, blockPos) != 0) return;
 
             // Use only optimal tools
-            if (suitableTools.get() && !interact.get() && !mc.player.getMainHandStack().isSuitableFor(blockState)) return;
+            if (suitableTools.get() && !interact.get() && !mc.player.getMainHandItem().isCorrectToolForDrops(blockState))
+                return;
 
             // Block must be breakable
             if (!BlockUtils.canBreak(blockPos, blockState) && !interact.get()) return;
@@ -550,7 +552,7 @@ public class Nuker extends Module {
             if (isOutOfRange(blockPos)) return;
 
             // Add block
-            blocks.add(blockPos.toImmutable());
+            blocks.add(blockPos.immutable());
         });
 
         // Break block if found
@@ -587,8 +589,7 @@ public class Nuker extends Module {
 
                 resetValues();
                 return;
-            }
-            else {
+            } else {
                 noBlockTimer = 0;
             }
 
@@ -670,16 +671,16 @@ public class Nuker extends Module {
     private void breakBlock(BlockPos blockPos) {
         if (interact.get()) {
             // Interact mode
-            BlockUtils.interact(new BlockHitResult(blockPos.toCenterPos(), BlockUtils.getDirection(blockPos), blockPos, true), Hand.MAIN_HAND, swing.get());
+            BlockUtils.interact(new BlockHitResult(blockPos.getCenter(), BlockUtils.getDirection(blockPos), blockPos, true), InteractionHand.MAIN_HAND, swing.get());
             interacted.add(blockPos);
         } else if (packetMine.get()) {
             // Packet mine mode
-            mc.interactionManager.sendSequencedPacket(mc.world, (sequence) -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos), sequence));
+            mc.gameMode.startPrediction(mc.level, sequence -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos), sequence));
 
-            if (swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
-            else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+            if (swing.get()) mc.player.swing(InteractionHand.MAIN_HAND);
+            else mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
 
-            mc.interactionManager.sendSequencedPacket(mc.world, (sequence) -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos), sequence));
+            mc.gameMode.startPrediction(mc.level, sequence -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos), sequence));
         } else {
             // Legit mine mode
             BlockUtils.breakBlock(blockPos, swing.get());
@@ -734,13 +735,13 @@ public class Nuker extends Module {
     }
 
     private void addTargetedBlockToList() {
-        if (!selectBlockBind.get().isPressed() || mc.currentScreen != null) return;
+        if (!selectBlockBind.get().isPressed() || mc.screen != null) return;
 
-        HitResult hitResult = mc.crosshairTarget;
+        HitResult hitResult = mc.hitResult;
         if (hitResult == null || hitResult.getType() != HitResult.Type.BLOCK) return;
 
         BlockPos pos = ((BlockHitResult) hitResult).getBlockPos();
-        Block targetBlock = mc.world.getBlockState(pos).getBlock();
+        Block targetBlock = mc.level.getBlockState(pos).getBlock();
 
         List<Block> list = listMode.get() == ListMode.Whitelist ? whitelist.get() : blacklist.get();
         String modeName = listMode.get().name();
