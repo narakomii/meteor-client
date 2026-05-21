@@ -18,8 +18,10 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.entity.DamageUtils;
+import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.EntityType;
@@ -65,6 +67,30 @@ public class AutoLog extends Module {
         .name("only-trusted")
         .description("Disconnects when a player not on your friends list appears in render distance.")
         .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> ignoreInvalid = sgGeneral.add(new BoolSetting.Builder()
+        .name("ignore-invalid")
+        .description("Ignores invalid players (bots).")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> usePlayerRange = sgGeneral.add(new BoolSetting.Builder()
+        .name("use-player-range")
+        .description("Disconnects when a player not on your friends list appears in render distance.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Integer> playerRange = sgGeneral.add(new IntSetting.Builder()
+        .name("player-range")
+        .description("How close a player has to be to you before you disconnect.")
+        .defaultValue(5)
+        .min(1)
+        .sliderMax(16)
+        .visible(() -> usePlayerRange.get())
         .build()
     );
 
@@ -171,6 +197,26 @@ public class AutoLog extends Module {
         }
     }
 
+    private boolean ignore(PlayerEntity player) {
+        if (!ignoreInvalid.get()) return false;
+
+        PlayerListEntry entry;
+        try {
+            if (EntityUtils.getGameMode(player) == null) return true;
+            if (player.getStringifiedName().contains(" ")) return true;
+
+            entry = mc.getNetworkHandler().getPlayerListEntry(player.getUuid());
+            if (entry == null) return true;
+            if (entry.getProfile() == null) return true;
+            if (entry.getProfile().name() != player.getStringifiedName()) return true;
+            if (entry.getLatency() > 1) return true;
+        } catch (NullPointerException e) {
+            return true;
+        }
+
+        return false;
+    }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         float playerHealth = mc.player.getHealth();
@@ -198,10 +244,19 @@ public class AutoLog extends Module {
 
         for (Entity entity : mc.world.getEntities()) {
             if (entity instanceof PlayerEntity player && player.getUuid() != mc.player.getUuid()) {
-                if (onlyTrusted.get() && player != mc.player && !Friends.get().isFriend(player)) {
-                    disconnect(Text.literal("Non-trusted player '" + Formatting.RED + player.getName().getString() + Formatting.WHITE + "' appeared in your render distance."));
-                    if (toggleOff.get()) this.toggle();
-                    return;
+                if (onlyTrusted.get() && player != mc.player && !Friends.get().isFriend(player) && !ignore((PlayerEntity) entity)) {
+                    if (usePlayerRange.get()) {
+                        if (PlayerUtils.isWithin(entity, playerRange.get())) {
+                            disconnect(Text.literal("Non-trusted player '" + Formatting.RED + player.getName().getString() + Formatting.WHITE + "' was within range."));
+                            if (toggleOff.get()) this.toggle();
+                            return;
+                        }
+                    }
+                    else {
+                        disconnect(Text.literal("Non-trusted player '" + Formatting.RED + player.getName().getString() + Formatting.WHITE + "' appeared in your render distance."));
+                        if (toggleOff.get()) this.toggle();
+                        return;
+                    }
                 }
 
                 if (instantDeath.get() && PlayerUtils.isWithin(entity, 8) && DamageUtils.getAttackDamage(player, mc.player)

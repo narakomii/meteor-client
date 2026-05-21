@@ -6,6 +6,7 @@
 package meteordevelopment.meteorclient.systems.modules.world;
 
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
 import meteordevelopment.meteorclient.events.meteor.KeyEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
@@ -19,6 +20,7 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.misc.Names;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
+import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -46,6 +48,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 import org.joml.Random;
 
@@ -314,6 +318,7 @@ public class Nuker extends Module {
 
     private boolean firstBlock;
     private final BlockPos.Mutable lastBlockPos = new BlockPos.Mutable();
+    private Block lastBlockType = null;
 
     private int timer;
     private int timerMax;
@@ -322,9 +327,41 @@ public class Nuker extends Module {
     private Vec3d randomOffsetOnFace;
     private int noBlockTimer;
 
+    // Checks if the player is within a square "radius" centered on the block
+    private boolean isVertical(BlockPos blockPos) {
+        return isVertical(blockPos, 1);
+    }
+    private boolean isVertical(BlockPos blockPos, double range) {
+        range = range / 2;
+
+        Vec3d playerPos = mc.player.getEyePos();
+        Vec3d centerPos = blockPos.toCenterPos();
+
+        return playerPos.x >= centerPos.x - range && playerPos.x <= centerPos.x + range
+            && playerPos.z >= centerPos.z - range && playerPos.z <= centerPos.z + range;
+    }
+
     private void resetOffsetOnFace(BlockPos blockPos) {
         // Check if the offset has already been reset for this block
-        if (lastBlockPos.equals(blockPos)) return;
+        Block type = mc.world.getBlockState(blockPos).getBlock();
+        if (lastBlockPos.equals(blockPos) && lastBlockType == type) return;
+
+        lastBlockPos.set(blockPos);
+        lastBlockType = type;
+
+        Vec3d playerPos = mc.player.getEyePos();
+        // If the block is directly above/below the player, minimize changing yaw
+        if (isVertical(blockPos, 0.7)) {
+            // Set the target to the player's position
+            double x = playerPos.x - (double) blockPos.getX();
+            double z = playerPos.z - (double) blockPos.getZ();
+            double yaw = Math.toRadians(mc.player.getYaw() + 40 * (Math.random() - 0.5) + 90);
+
+            // Adjust the target slightly to avoid yaw resetting to 0
+            randomOffsetOnFace = new Vec3d(x + Math.cos(yaw) / 64, 0.5, z + Math.sin(yaw) / 64);
+
+            return;
+        }
 
         // Select a random visible side of the block
         ArrayList<Direction> sideList = new ArrayList<>(visibleFaceMap.get(blockPos));
@@ -360,11 +397,18 @@ public class Nuker extends Module {
 
     @Override
     public void onActivate() {
+        resetValues();
+    }
+
+    private void resetValues() {
         currentBlock = null;
         firstBlock = true;
-        timer = 0;
+        timer = timerMax = smoothRotate.get() ? delay.get() : 0;
+        startYaw = mc.player.getYaw();
+        startPitch = mc.player.getPitch();
         noBlockTimer = 0;
         lastBlockPos.set((int) Math.floor(mc.player.getEyePos().x), (int) Math.floor(mc.player.getEyePos().y), (int) Math.floor(mc.player.getEyePos().z));
+        lastBlockType = null;
         interacted.clear();
     }
 
@@ -394,6 +438,12 @@ public class Nuker extends Module {
         if (event.action == KeyAction.Press) addTargetedBlockToList();
     }
 
+    // Sorts nearest to player first, divided to lower importance below the other sort value results
+    private double secondarySort(BlockPos blockPos) {
+        Vec3d eyePos = mc.player.getEyePos();
+        return Utils.squaredDistance(eyePos.x, eyePos.y, eyePos.z, ((double) blockPos.getX()) + 0.5, ((double) blockPos.getY()) + 0.5, ((double) blockPos.getZ()) + 0.5) / 262144;
+    }
+
     @EventHandler
     private void onTickPre(TickEvent.Pre event) {
         // Update timer
@@ -406,15 +456,18 @@ public class Nuker extends Module {
         // Calculate some stuff
         boolean smoothRotateEnabled = rotate.get() && maxBlocksPerTick.get() <= 1 && smoothRotate.get();
 
-        double pX = mc.player.getX(), pY = mc.player.getY(), pZ = mc.player.getZ();
-        double rangeSq = Math.pow(range.get(), 2);
+        Vec3d eyePos = mc.player.getEyePos();
         BlockPos playerBlockPos = mc.player.getBlockPos();
 
-        if (shape.get() == Shape.UniformCube) range.set((double) Math.round(range.get()));
+        double pX = eyePos.x, pY = eyePos.y, pZ = eyePos.z;
+        double rangeD = range.get() + 2;
+        double rangeSq = Math.pow(rangeD, 2);
+
+        if (shape.get() == Shape.UniformCube) range.set((double) Math.round(rangeD));
 
         double pX_ = pX;
         double pZ_ = pZ;
-        int r = (int) Math.round(range.get());
+        int r = (int) Math.round(rangeD);
 
         if (shape.get() == Shape.UniformCube) {
             pX_ += 1; // weird position stuff
@@ -461,14 +514,14 @@ public class Nuker extends Module {
         Box box = new Box(pos1.toCenterPos(), pos2.toCenterPos());
 
         // Find blocks to break
-        BlockIterator.register(Math.max((int) Math.ceil(range.get() + 1), maxh), Math.max((int) Math.ceil(range.get()), maxv), (blockPos, blockState) -> {
+        BlockIterator.register(Math.max((int) Math.ceil(rangeD + 1), maxh), Math.max((int) Math.ceil(rangeD), maxv), (blockPos, blockState) -> {
             Vec3d center = blockPos.toCenterPos();
             switch (shape.get()) {
                 case Sphere -> {
                     if (Utils.squaredDistance(pX, pY, pZ, center.getX(), center.getY(), center.getZ()) > rangeSq) return;
                 }
                 case UniformCube -> {
-                    if (chebyshevDist(playerBlockPos.getX(), playerBlockPos.getY(), playerBlockPos.getZ(), blockPos.getX(), blockPos.getY(), blockPos.getZ()) >= range.get()) return;
+                    if (chebyshevDist(playerBlockPos.getX(), playerBlockPos.getY(), playerBlockPos.getZ(), blockPos.getX(), blockPos.getY(), blockPos.getZ()) >= rangeD) return;
                 }
                 case Cube -> {
                     if (!box.contains(center)) return;
@@ -494,7 +547,7 @@ public class Nuker extends Module {
             if (interact.get() && interacted.contains(blockPos)) return;
 
             // Raycast to block
-            if (isOutOfRange(blockPos, blockState)) return;
+            if (isOutOfRange(blockPos)) return;
 
             // Add block
             blocks.add(blockPos.toImmutable());
@@ -508,9 +561,22 @@ public class Nuker extends Module {
             else if (sortMode.get() == SortMode.ClosestToLast && noBlockTimer <= 0) {
                 // Sort by closest to last mined block, then closest to player
                 blocks.sort(Comparator.comparingDouble(value ->
-                    Utils.squaredDistance((double) lastBlockPos.getX() + 0.5, (double) lastBlockPos.getY() + 0.5, (double) lastBlockPos.getZ() + 0.5, (double) value.getX() + 0.5, (double) value.getY() + 0.5, (double) value.getZ() + 0.5)
-                    + Utils.squaredDistance(pX, pY, pZ, (double) value.getX() + 0.5, (double) value.getY() + 0.5, (double) value.getZ() + 0.5) / 262144
+                    Utils.squaredDistance((double) lastBlockPos.getX(), (double) lastBlockPos.getY(), (double) lastBlockPos.getZ(), (double) value.getX(), (double) value.getY(), (double) value.getZ())
+                    + secondarySort(value)
                 ));
+            } else if (sortMode.get() == SortMode.ClosestAngleToLast && noBlockTimer <= 0) {
+                RenderUtils.renderTickingPoint(mc.player.getEyePos().add(Vec3d.fromPolar((float) startPitch, (float) startYaw)), Color.WHITE, 1, false);
+                // Sort by closest (by angle) to last mined block, then closest to player
+                blocks.sort(Comparator.comparingDouble(value -> {
+                    // Ignore calculated yaw difference if the block is directly above/below the player
+                    if (isVertical(value))
+                        return Math.abs(MathHelper.wrapDegrees(90 - startPitch))
+                        + secondarySort(value);
+                    else
+                        return Math.abs(MathHelper.wrapDegrees(Rotations.getYaw(value.toCenterPos()) - startYaw)) * 1.3 /* <- Increase importance of yaw compared to pitch */
+                        + Math.abs(MathHelper.wrapDegrees(Rotations.getPitch(value.toCenterPos()) - startPitch))
+                        + secondarySort(value);
+                }));
             } else if (sortMode.get() != SortMode.None)
                 blocks.sort(Comparator.comparingDouble(value -> Utils.squaredDistance(pX, pY, pZ, value.getX() + 0.5, value.getY() + 0.5, value.getZ() + 0.5) * (sortMode.get() == SortMode.Furthest ? -1 : 1)));
 
@@ -519,11 +585,7 @@ public class Nuker extends Module {
                 // If no block was found for long enough then set firstBlock flag to true to not wait before breaking another again
                 if (!smoothRotateEnabled && noBlockTimer++ >= delay.get()) firstBlock = true;
 
-                // Reset some values
-                currentBlock = null;
-                interacted.clear();
-                startYaw = mc.player.getYaw();
-                startPitch = mc.player.getPitch();
+                resetValues();
                 return;
             }
             else {
@@ -543,15 +605,13 @@ public class Nuker extends Module {
             }
 
             // Update timer
-            if (!firstBlock && !lastBlockPos.equals(blocks.getFirst())) {
+            if (!firstBlock && (!lastBlockPos.equals(blocks.getFirst()) || lastBlockType != mc.world.getBlockState(blocks.getFirst()).getBlock())) {
                 timer = timerMax = delay.get();
 
                 firstBlock = false;
 
                 // Try to reset random face offset
-                resetOffsetOnFace(blocks.getFirst());
-
-                lastBlockPos.set(blocks.getFirst());
+                //resetOffsetOnFace(blocks.getFirst());
             }
 
             // Break
@@ -562,14 +622,17 @@ public class Nuker extends Module {
 
                 boolean canInstaMine = BlockUtils.canInstaBreak(block);
 
+                // Try to reset random face offset
                 resetOffsetOnFace(block);
+
                 // Add the offset to the block's position
                 Vec3d lookPos = new Vec3d(block).add(randomOffsetOnFace);
 
-                if (enableRenderDebug.get()) {
-                    // Display currently targeted point
-                    RenderUtils.renderTickingPoint(lookPos, Color.GREEN, 1, false);
-                }
+                if (enableRenderBreaking.get()) RenderUtils.renderTickingBlock(block, sideColor.get(), lineColor.get(), shapeModeBreak.get(), 0, 8, true, false);
+                if (enableRenderDebug.get()) RenderUtils.renderTickingPoint(lookPos, Color.GREEN, 1, false);
+
+                currentBlock = block;
+                count++;
 
                 if (timer <= 0) {
                     // If delay is over, mine the block
@@ -594,12 +657,6 @@ public class Nuker extends Module {
                     break;
                 }
 
-                if (enableRenderBreaking.get()) RenderUtils.renderTickingBlock(block, sideColor.get(), lineColor.get(), shapeModeBreak.get(), 0, 8, true, false);
-                lastBlockPos.set(block);
-
-                currentBlock = block;
-
-                count++;
                 if (!canInstaMine && !packetMine.get() /* With packet mine attempt to break everything possible at once */) break;
             }
 
@@ -633,10 +690,14 @@ public class Nuker extends Module {
 
     private static final double boxShrink = Math.pow(2, -16);
 
-    private boolean isOutOfRange(BlockPos blockPos, BlockState blockState) {
+    private boolean isOutOfRange(BlockPos blockPos) {
         boolean allOutOfRange = true;
 
-        VoxelShape shape = blockState.getOutlineShape(mc.player.getEntityWorld(), blockPos);
+        Vec3d eyePos = mc.player.getEyePos();
+        double rangeSq = Math.pow(range.get(), 2);
+        double wallsRangeSq = Math.pow(wallsRange.get(), 2);
+
+        VoxelShape shape = mc.world.getBlockState(blockPos).getOutlineShape(mc.player.getEntityWorld(), blockPos);
 
         // Iterate over each cuboid of the block's interaction box
         for (Box box : shape.getBoundingBoxes()) {
@@ -647,17 +708,18 @@ public class Nuker extends Module {
             // Iterate over each corner of the adjusted cuboid
             for (Vec3d corner : Utils.getBoxCorners(box)) {
                 // Raycast to the corner
-                RaycastContext raycastContext = new RaycastContext(mc.player.getEyePos(), corner, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player);
+                RaycastContext raycastContext = new RaycastContext(eyePos, corner, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player);
                 BlockHitResult result = mc.world.raycast(raycastContext);
 
-                boolean outOfRange = result == null || !result.getBlockPos().equals(blockPos);
+                boolean outOfRange = eyePos.squaredDistanceTo(corner) > wallsRangeSq /* <- Check if the block is within through-wall range */
+                    && (result == null || !result.getBlockPos().equals(blockPos) || eyePos.squaredDistanceTo(result.getPos()) > rangeSq);
 
                 if (!outOfRange) {
-                    // If raycast hit, add the block face to the map
+                    // If in range, add the block face to the map
                     visibleFaceMap.put(blockPos.toImmutable(), result.getSide());
 
-                    // Then, if debug rendering is disabled: break and return false immediately
-                    // If enabled: set return value to false and draw the corner
+                    // Then, if debug rendering is disabled: break and return false (block is not out of range) immediately
+                    // If enabled: set return value to false, draw the corner, and continue iterating
                     if (!enableRenderDebug.get()) {
                        return false;
                     } else {
@@ -713,7 +775,8 @@ public class Nuker extends Module {
         Closest,
         Furthest,
         TopDown,
-        ClosestToLast
+        ClosestToLast,
+        ClosestAngleToLast
     }
 
     public enum Shape {
